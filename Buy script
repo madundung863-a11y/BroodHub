@@ -1,0 +1,488 @@
+local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
+
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Remotes = ReplicatedStorage:WaitForChild("Library"):WaitForChild("Remotes")
+local Send = Remotes:WaitForChild("Send")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local Stats = game:GetService("Stats")
+
+local AllStands = {
+    "None", "Putrid Whine", "Anubis", "Kars", "Dio's The World",
+    "Dio's The World Over Heaven", "Tusk Act 1",
+    "Festive The World", "Jotaro's Star Platinum",
+    "Jotaro's Star Platinum Over Heaven", "Shadow The World",
+    "Silver Chariot OVA", "Silver Chariot OVA Requiem",
+    "Star Platinum OVA Over Heaven", "The World OVA Over Heaven",
+    "The World OVA", "Star Platinum OVA", "Cauldron Black"
+}
+
+local AllAttributes = {
+    "None", "Strong", "Powerful", "Manic", "Tough", "Enrage", "Sloppy",
+    "Brute", "Evened", "Lethargic", "Godly", "Daemon", "Invincible",
+    "Forceful", "Tragic", "Legendary", "Thief", "Multiply", "Critical"
+}
+
+local function GetCurrentAttribute()
+    local stats = LocalPlayer.Data and LocalPlayer.Data.Stats
+    if stats and stats.Attribute and stats.Attribute.Value then
+        return stats.Attribute.Value
+    end
+    return nil
+end
+
+local function GetCurrentStand()
+    local stats = LocalPlayer.Data and LocalPlayer.Data.Stats
+    if stats and stats.Ability and stats.Ability.Value then
+        return stats.Ability.Value
+    end
+    return nil
+end
+
+local function FindItemInBackpack(itemName)
+    local item = LocalPlayer.Backpack and LocalPlayer.Backpack:FindFirstChild(itemName)
+    if item then return item end
+    if LocalPlayer.Data and LocalPlayer.Data:FindFirstChild("Backpack") then
+        item = LocalPlayer.Data.Backpack:FindFirstChild(itemName)
+        if item then return item end
+    end
+    return nil
+end
+
+local function FindItemInAllSpawns(itemName)
+    local spawns = Workspace.World.Map.ItemSpawns
+    for _, child in ipairs(spawns:GetChildren()) do
+        local item = child:FindFirstChild(itemName)
+        if item then return item end
+    end
+    return nil
+end
+
+local function GetPositionFromItem(item)
+    if item:IsA("BasePart") then
+        return item.Position
+    elseif item:IsA("Tool") then
+        local handle = item:FindFirstChild("Handle")
+        if handle and handle:IsA("BasePart") then
+            return handle.Position
+        end
+    end
+    return nil
+end
+
+local function TeleportToItem(itemPart)
+    local character = LocalPlayer.Character
+    if not character then return false end
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+    if not humanoidRootPart then return false end
+    local pos = GetPositionFromItem(itemPart)
+    if not pos then return false end
+    humanoidRootPart.CFrame = CFrame.new(pos + Vector3.new(0, 3, 0))
+    return true
+end
+
+local FPS_Enabled = false
+local FPSText = Drawing.new("Text")
+FPSText.Text = "FPS: 0 | Пинг: 0 мс"
+FPSText.Position = Vector2.new(10, 10)
+FPSText.Size = 18
+FPSText.Color = Color3.fromRGB(0, 255, 100)
+FPSText.Outline = true
+FPSText.OutlineColor = Color3.fromRGB(0, 0, 0)
+FPSText.Font = Drawing.Fonts.UI
+FPSText.Visible = false
+FPSText.ZIndex = 999
+
+local fpsHistory = {}
+local function updateFPS()
+    local dt = RunService.RenderStepped:Wait()
+    table.insert(fpsHistory, 1 / dt)
+    if #fpsHistory > 60 then
+        table.remove(fpsHistory, 1)
+    end
+    local sum = 0
+    for _, v in ipairs(fpsHistory) do
+        sum = sum + v
+    end
+    local avgFPS = math.floor(sum / #fpsHistory)
+    local ping = Stats.Network.ServerStatsItem["Data Ping"]:GetValueString()
+    return avgFPS, ping
+end
+
+local function StartFPSDrawer()
+    task.spawn(function()
+        while FPS_Enabled do
+            local fps, ping = updateFPS()
+            FPSText.Text = "FPS: " .. fps .. " | Пинг: " .. ping .. " мс"
+            task.wait()
+        end
+    end)
+end
+
+local Window = WindUI:CreateWindow({
+    Title = "DLC | AUTOFARM",
+    Author = "by sheepstick",
+    Folder = "dlc_autofarm",
+    Icon = "crosshair",
+    Size = UDim2.fromOffset(600, 480),
+    HideSearchBar = true,
+})
+
+local FarmTab = Window:Tab({ Title = "Фарм", Icon = "crosshair", IconColor = Color3.fromHex("#30ff6a") })
+local TeleportTab = Window:Tab({ Title = "Телепорт", Icon = "zap", IconColor = Color3.fromHex("#30c0ff") })
+local VisualTab = Window:Tab({ Title = "Визуал", Icon = "eye", IconColor = Color3.fromHex("#ffb030") })
+local ThemeTab = Window:Tab({ Title = "Темы", Icon = "droplet", IconColor = Color3.fromHex("#b030ff") })
+
+FarmTab:Section({ Title = "Информация", TextSize = 14 })
+
+local StandParagraph = FarmTab:Paragraph({
+    Title = "Текущий стенд",
+    Desc = "Стенд: нет"
+})
+
+local AttrParagraph = FarmTab:Paragraph({
+    Title = "Текущий атрибут",
+    Desc = "Атрибут: нет"
+})
+
+local RollParagraph = FarmTab:Paragraph({
+    Title = "Последний ролл",
+    Desc = "Ожидание..."
+})
+
+local function UpdateParagraphs()
+    local stand = GetCurrentStand()
+    local attr = GetCurrentAttribute()
+    StandParagraph:SetDesc("Стенд: " .. (stand or "нет"))
+    AttrParagraph:SetDesc("Атрибут: " .. (attr or "нет"))
+end
+
+FarmTab:Divider()
+FarmTab:Section({ Title = "Настройки фарма", TextSize = 14 })
+
+local selectedArrow = "Stand Arrow"
+FarmTab:Dropdown({
+    Title = "Тип стрелы",
+    Desc = "Выберите тип стрелы для фарма",
+    Values = {"Stand Arrow", "Unusual Arrow"},
+    Value = "Stand Arrow",
+    Multi = false,
+    Callback = function(selected) selectedArrow = selected end
+})
+
+local selectedStands = {}
+FarmTab:Dropdown({
+    Title = "Выбор стендов",
+    Desc = "Выберите один или несколько стендов",
+    Values = AllStands,
+    Value = {},
+    Multi = true,
+    Callback = function(selected)
+        if type(selected) == "table" then
+            selectedStands = {}
+            for _, s in ipairs(selected) do
+                selectedStands[s] = true
+            end
+        else
+            selectedStands = {[selected] = true}
+        end
+        WindUI:Notify({
+            Title = "Выбор стендов",
+            Content = "Выбрано стендов: " .. (next(selectedStands) and #selected or 0),
+            Duration = 2
+        })
+    end
+})
+
+local selectedAttrs = {}
+FarmTab:Dropdown({
+    Title = "Выбор атрибутов",
+    Desc = "Выберите один или несколько атрибутов",
+    Values = AllAttributes,
+    Value = {},
+    Multi = true,
+    Callback = function(selected)
+        if type(selected) == "table" then
+            selectedAttrs = {}
+            for _, a in ipairs(selected) do
+                selectedAttrs[a] = true
+            end
+        else
+            selectedAttrs = {[selected] = true}
+        end
+        WindUI:Notify({
+            Title = "Выбор атрибутов",
+            Content = "Выбрано атрибутов: " .. (next(selectedAttrs) and #selected or 0),
+            Duration = 2
+        })
+    end
+})
+
+FarmTab:Divider()
+FarmTab:Section({ Title = "Управление", TextSize = 14 })
+
+local FarmEnabled = false
+local FarmTpEnabled = false
+
+FarmTab:Toggle({
+    Title = "Автофарм",
+    Callback = function(v)
+        FarmEnabled = v
+        if v then StartFarm() end
+    end
+})
+
+FarmTab:Toggle({
+    Title = "Телепорт к предметам",
+    Callback = function(v) FarmTpEnabled = v end
+})
+
+FarmTab:Button({
+    Title = "СТОП",
+    Justify = "Center",
+    Callback = function()
+        FarmEnabled = false
+        WindUI:Notify({
+            Title = "Фарм",
+            Content = "Фарм остановлен",
+            Duration = 2
+        })
+    end
+})
+
+TeleportTab:Section({ Title = "Зацикленные телепорты", TextSize = 14 })
+
+local tpStates = {
+    ["Stand Arrow"] = false,
+    ["Unusual Arrow"] = false,
+    ["Rokakaka"] = false
+}
+
+TeleportTab:Toggle({
+    Title = "Обычная стрела",
+    Callback = function(v)
+        tpStates["Stand Arrow"] = v
+        if v then StartTpLoop("Stand Arrow") end
+    end
+})
+
+TeleportTab:Toggle({
+    Title = "Необычная стрела",
+    Callback = function(v)
+        tpStates["Unusual Arrow"] = v
+        if v then StartTpLoop("Unusual Arrow") end
+    end
+})
+
+TeleportTab:Toggle({
+    Title = "Рокакака",
+    Callback = function(v)
+        tpStates["Rokakaka"] = v
+        if v then StartTpLoop("Rokakaka") end
+    end
+})
+
+VisualTab:Section({ Title = "FPS на экране", TextSize = 14 })
+
+local FPS_Color = Color3.fromRGB(0, 255, 100)
+local FPS_Size = 18
+local FPS_Position = Vector2.new(10, 10)
+
+VisualTab:Toggle({
+    Title = "Показывать FPS на экране",
+    Callback = function(v)
+        FPS_Enabled = v
+        FPSText.Visible = v
+        if v then
+            StartFPSDrawer()
+        end
+    end
+})
+
+VisualTab:Colorpicker({
+    Title = "Цвет текста FPS",
+    Default = Color3.fromRGB(0, 255, 100),
+    Callback = function(c)
+        FPS_Color = c
+        FPSText.Color = c
+    end
+})
+
+VisualTab:Slider({
+    Title = "Размер текста FPS",
+    Value = { Min = 12, Max = 48, Default = 18 },
+    Step = 1,
+    Callback = function(v)
+        FPS_Size = v
+        FPSText.Size = v
+    end
+})
+
+VisualTab:Slider({
+    Title = "Позиция X",
+    Value = { Min = 0, Max = 1920, Default = 10 },
+    Step = 1,
+    Callback = function(v)
+        FPS_Position = Vector2.new(v, FPS_Position.Y)
+        FPSText.Position = FPS_Position
+    end
+})
+
+VisualTab:Slider({
+    Title = "Позиция Y",
+    Value = { Min = 0, Max = 1080, Default = 10 },
+    Step = 1,
+    Callback = function(v)
+        FPS_Position = Vector2.new(FPS_Position.X, v)
+        FPSText.Position = FPS_Position
+    end
+})
+
+VisualTab:Dropdown({
+    Title = "Шрифт FPS",
+    Desc = "Выберите шрифт",
+    Values = {"UI", "System", "Plex", "Monospace"},
+    Value = "UI",
+    Multi = false,
+    Callback = function(selected)
+        local fonts = {
+            UI = Drawing.Fonts.UI,
+            System = Drawing.Fonts.System,
+            Plex = Drawing.Fonts.Plex,
+            Monospace = Drawing.Fonts.Monospace
+        }
+        FPSText.Font = fonts[selected] or Drawing.Fonts.UI
+    end
+})
+
+VisualTab:Toggle({
+    Title = "Обводка текста",
+    Value = true,
+    Callback = function(v)
+        FPSText.Outline = v
+    end
+})
+
+VisualTab:Paragraph({
+    Title = "Информация",
+    Desc = "FPS и Пинг отображаются в углу экрана\nНастройте цвет, размер и позицию под себя"
+})
+
+ThemeTab:Section({ Title = "Выбор темы", TextSize = 14 })
+for _, theme in ipairs({"Dark","Crimson","NeonGreen","ElectricBlue","GoldenHour","PurpleHaze","SunsetBlaze","Midnight"}) do
+    ThemeTab:Button({
+        Title = theme,
+        Justify = "Center",
+        Callback = function()
+            pcall(function() WindUI:SetTheme(theme) end)
+        end
+    })
+end
+
+local function IsStandSelected(stand)
+    if next(selectedStands) == nil then return true end
+    return selectedStands[stand] == true
+end
+
+local function IsAttrSelected(attr)
+    if next(selectedAttrs) == nil then return true end
+    return selectedAttrs[attr] == true
+end
+
+local farmTask = nil
+
+function StartFarm()
+    if farmTask then return end
+    
+    LocalPlayer:SetAttribute("ItemSkipConfirmationOn", true)
+    LocalPlayer:SetAttribute("ItemAttributeConfirmationOn", false)
+    LocalPlayer:SetAttribute("ItemStandConfirmationOn", false)
+    
+    farmTask = task.spawn(function()
+        while FarmEnabled do
+            UpdateParagraphs()
+            
+            local stand = GetCurrentStand()
+            local attr = GetCurrentAttribute()
+            
+            if stand and stand ~= "None" then
+                RollParagraph:SetDesc("Выпало: " .. stand .. " | " .. (attr or "None"))
+                WindUI:Notify({
+                    Title = "Новый ролл",
+                    Content = "Стенд: " .. stand .. "\nАтрибут: " .. (attr or "None"),
+                    Duration = 2
+                })
+            end
+            
+            local standMatch = IsStandSelected(stand)
+            local attrMatch = IsAttrSelected(attr)
+            
+            if standMatch and attrMatch and stand and stand ~= "None" then
+                RollParagraph:SetDesc("ГОТОВО! " .. stand .. " | " .. (attr or "None"))
+                WindUI:Notify({
+                    Title = "Фарм завершен!",
+                    Content = "Стенд: " .. stand .. "\nАтрибут: " .. (attr or "None"),
+                    Duration = 5
+                })
+                FarmEnabled = false
+                break
+            end
+            
+            if stand and stand ~= "None" then
+                local roka = FindItemInBackpack("Rokakaka")
+                if roka then
+                    Send:FireServer("Item", "Rokakaka")
+                    task.wait(1.5)
+                elseif FarmTpEnabled then
+                    local rokaPart = FindItemInAllSpawns("Rokakaka")
+                    if rokaPart then
+                        TeleportToItem(rokaPart)
+                        task.wait(1)
+                    else
+                        task.wait(3)
+                    end
+                else
+                    task.wait(3)
+                end
+            else
+                local arrow = FindItemInBackpack(selectedArrow)
+                if arrow then
+                    Send:FireServer("Item", selectedArrow)
+                    task.wait(1.5)
+                elseif FarmTpEnabled then
+                    local arrowPart = FindItemInAllSpawns(selectedArrow)
+                    if arrowPart then
+                        TeleportToItem(arrowPart)
+                        task.wait(1)
+                    else
+                        task.wait(3)
+                    end
+                else
+                    task.wait(3)
+                end
+            end
+            
+            task.wait(0.3)
+        end
+        farmTask = nil
+    end)
+end
+
+local tpTasks = {}
+
+function StartTpLoop(itemName)
+    if tpTasks[itemName] then return end
+    
+    tpTasks[itemName] = task.spawn(function()
+        while tpStates[itemName] do
+            local item = FindItemInAllSpawns(itemName)
+            if item then
+                TeleportToItem(item)
+            end
+            task.wait(0.5)
+        end
+        tpTasks[itemName] = nil
+    end)
+end
